@@ -7,7 +7,7 @@ from homeassistant.const import Platform
 from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-# Utilisation du connecteur recommandé par Home Assistant pour éviter le WARNING
+# Utilisation du connecteur recommandé par Home Assistant
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
 from .const import DOMAIN, CONF_MAC, ZONE_LEFT, ALPICOOL_CHARACTERISTIC_UUID
@@ -66,7 +66,7 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
 
                 _LOGGER.info("Tentative de connexion sécurisée à la glacière %s", self.address)
                 
-                # Connexion via le wrapper officiel de Home Assistant (Ligne 65 corrigée)
+                # Connexion via le wrapper officiel de Home Assistant
                 client = await establish_connection(
                     BleakClientWithServiceCache,
                     ble_device,
@@ -104,7 +104,6 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
 
     def _notification_handler(self, sender: int, data: bytearray):
         """Réception de la trame brute et injection directe dans le climate."""
-        # On accepte les trames courtes ou longues d'Alpicool
         if len(data) >= 14:
             self.data = data
             _LOGGER.debug("Trame reçue (Hex): %s", data.hex())
@@ -126,4 +125,22 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
         try:
             await self.client.write_gatt_char(ALPICOOL_CHARACTERISTIC_UUID, bytes(cmd), response=False)
         except Exception as err:
-            _LOGGER.error("Erreur
+            _LOGGER.error("Erreur Bluetooth lors de l'envoi de consigne : %s", err)
+
+    async def async_set_power(self, status: bool):
+        """Allumage / Extinction global."""
+        if not self._connected or not self.client:
+            return
+        val = 0x01 if status else 0x00
+        cmd = bytes([0xFE, 0xFE, 0x03, 0x02, val])
+        await self.client.write_gatt_char(ALPICOOL_CHARACTERISTIC_UUID, cmd, response=False)
+
+    async def async_disconnect(self):
+        """Déchargement propre."""
+        self._connected = False
+        if self.client:
+            try:
+                await self.client.stop_notify(ALPICOOL_CHARACTERISTIC_UUID)
+                await self.client.disconnect()
+            except Exception as err:
+                _LOGGER.error("Erreur lors de la deconnexion : %s", err)
