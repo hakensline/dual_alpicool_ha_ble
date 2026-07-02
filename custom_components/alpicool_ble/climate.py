@@ -15,9 +15,11 @@ async def async_setup_entry(
 ) -> None:
     """Configuration des entités basées sur l'entrée de config."""
     api = hass.data[DOMAIN][entry.entry_id]
-    address = entry.data["address"]
     
-    # On force la création des deux zones quoi qu'il arrive
+    # Sécurité : on teste "address", et si elle n'existe pas, on tente "mac"
+    address = entry.data.get("address", entry.data.get("mac", "00:00:00:00:00:00"))
+    
+    # Ajout des deux zones distinctes
     async_add_entities([
         AlpicoolBLEClimateDual(api, entry, address, "left"),
         AlpicoolBLEClimateDual(api, entry, address, "right")
@@ -84,7 +86,6 @@ class AlpicoolBLEClimateDual(ClimateEntity):
         if self._zone == "left":
             temp = self.api.status.get("left_current")
         else:
-            # Si le statut dual-zone n'est pas encore décodé, on utilise temporairement left
             temp = self.api.status.get("right_current", self.api.status.get("left_current"))
         return float(temp) if temp is not None else None
 
@@ -104,7 +105,7 @@ class AlpicoolBLEClimateDual(ClimateEntity):
             return
 
         temp_int = int(target_temp)
-        # Utilisation de la méthode de Gruni22 : async_set_temperature(zone, temp)
+        # Appel de la méthode officielle présente dans api.py
         await self.api.async_set_temperature(self._zone, temp_int)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
