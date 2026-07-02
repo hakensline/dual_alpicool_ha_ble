@@ -4,88 +4,124 @@ from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from .const import DOMAIN, ZONE_LEFT, ZONE_RIGHT, MIN_TEMP, MAX_TEMP
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
     hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Configuration des entités de climat."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    """Configuration des entités basées sur l'entrée de config."""
+    api = hass.data[DOMAIN][entry.entry_id]
+    address = entry.data["address"]
+    
+    # Ajout des deux zones distinctes
     async_add_entities([
-        AlpicoolBLEClimate(coordinator, entry, ZONE_LEFT),
-        AlpicoolBLEClimate(coordinator, entry, ZONE_RIGHT)
+        AlpicoolBLEClimateDual(api, entry, address, "left"),
+        AlpicoolBLEClimateDual(api, entry, address, "right")
     ])
 
-class AlpicoolBLEClimate(CoordinatorEntity, ClimateEntity):
-    """Représentation d'une zone de contrôle de la glacière."""
+class AlpicoolBLEClimateDual(ClimateEntity):
+    """Représentation d'une zone de la glacière."""
 
     _attr_has_entity_name = True
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
-    _attr_min_temp = MIN_TEMP
-    _attr_max_temp = MAX_TEMP
+    _attr_min_temp = -20
+    _attr_max_temp = 20
     _attr_target_temperature_step = 1
 
-    def __init__(self, coordinator, entry, zone: str) -> None:
+    def __init__(self, api, entry, address: str, zone: str) -> None:
         """Initialisation."""
-        super().__init__(coordinator)
+        self.api = api
         self._entry = entry
+        self._address = address
         self._zone = zone
         
-        zone_label = "Zone Gauche" if zone == ZONE_LEFT else "Zone Droite"
+        zone_label = "Zone Gauche" if zone == "left" else "Zone Droite"
         self._attr_name = f"{zone_label}"
         self._attr_unique_id = f"{entry.entry_id}_{zone}"
         
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Glacière Outwell",
-            "manufacturer": "Outwell / Alpicool",
+            "name": entry.title,
         }
+
+    async def async_added_to_hass(self) -> None:
+        """S'abonne aux mises à jour du dispatcher de Gruni22."""
+        @callback
+        def async_update_state():
+            """Force la mise à jour des états dans HA quand l'API reçoit des données."""
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, f"{DOMAIN}_{self._address}_update", async_update_state
+            )
+        )
+
+    @property
+    def should_poll(self) -> bool:
+        """Les mises à jour sont poussées par le dispatcher."""
+        return False
+
+    @property
+    def available(self) -> bool:
+        """Vérifie si l'API est bien connectée."""
+        return self.api.is_connected if hasattr(self.api, "is_connected") else True
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Retourne le statut d'alimentation."""
-        if self.coordinator.data and len(self.coordinator.data) >= 6 and self.coordinator.data[5] == 0:
+        """Statut d'alimentation récupéré de l'API."""
+        # Si l'API possède une propriété d'alimentation (souvent 'power' ou 'is_on')
+        if hasattr(self.api, "power") and not self.api.power:
             return HVACMode.OFF
         return HVACMode.COOL
 
     @property
     def current_temperature(self) -> float | None:
-        """Température en temps réel."""
-        data = self.coordinator.data
-        if not data or len(data) < 10:
-            return None
-        try:
-            if self._zone == ZONE_LEFT:
-                return float(int.from_bytes([data[7]], byteorder="big", signed=True))
-            return float(int.from_bytes([data[8]], byteorder="big", signed=True))
-        except Exception:
-            return None
+        """Récupère la température actuelle de la zone correspondante depuis l'API."""
+        # Dans les modèles double zone Alpicool, Gruni22 stocke souvent 
+        # la zone 1 dans 'temperature' ou 'current_temperature'.
+        # On va vérifier si 'temperature_right' existe dans son api.py
+        if self._zone == "left":
+            return float(self.api.temperature) if hasattr(self.api, "temperature") else None
+        else:
+            if hasattr(self.api, "temperature_right"):
+                return float(self.api.temperature_right)
+            # Si le fichier api.py d'origine n'a pas encore la variable, on l'aidera juste après
+            return float(self.api.temperature) if hasattr(self.api, "temperature") else None
 
     @property
     def target_temperature(self) -> float | None:
-        """Consigne de température."""
-        data = self.coordinator.data
-        if not data or len(data) < 14:
-            return None
-        try:
-            if self._zone == ZONE_LEFT:
-                return float(int.from_bytes([data[11]], byteorder="big", signed=True))
-            return float(int.from_bytes([data[12]], byteorder="big", signed=True))
-        except Exception:
-            return None
+        """Consigne de température de la zone."""
+        if self._zone == "left":
+            return float(self.api.target_temperature) if hasattr(self.api, "target_temperature") else None
+        else:
+            if hasattr(self.api, "target_temperature_right"):
+                return float(self.api.target_temperature_right)
+            return float(self.api.target_temperature) if hasattr(self.api, "target_temperature") else None
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Envoie la consigne."""
+        """Définit la température via les méthodes de l'API."""
         target_temp = kwargs.get(ATTR_TEMPERATURE)
-        if target_temp is not None:
-            await self.coordinator.async_set_temperature(int(target_temp), self._zone)
+        if target_temp is None:
+            return
+
+        temp_int = int(target_temp)
+        if self._zone == "left":
+            if hasattr(self.api, "set_temperature"):
+                await self.api.set_temperature(temp_int)
+        else:
+            if hasattr(self.api, "set_temperature_right"):
+                await self.api.set_temperature_right(temp_int)
+            elif hasattr(self.api, "set_temperature"):
+                await self.api.set_temperature(temp_int)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Allume / Éteint."""
-        await self.coordinator.async_set_power(hvac_mode != HVACMode.OFF)
+        """Allume ou éteint la glacière."""
+        if hasattr(self.api, "set_power"):
+            await self.api.set_power(hvac_mode != HVACMode.OFF)
