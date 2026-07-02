@@ -1,45 +1,26 @@
-"""Constants for the Alpicool BLE integration."""
-
-from enum import IntEnum
+"""Constantes pour l'intégration Alpicool BLE Dual Zone."""
 
 DOMAIN = "alpicool_ble"
 
-FRIDGE_RW_CHARACTERISTIC_UUID = "00001235-0000-1000-8000-00805f9b34fb"
-FRIDGE_NOTIFY_UUID = "00001236-0000-1000-8000-00805f9b34fb"
+# Configuration
+CONF_MAC = "mac"
+CONF_NAME = "name"
 
-# --- Configuration Options ---
-CONF_DUAL_ZONE_MODES = "dual_zone_modes"
+# Identifiants uniques des zones pour Home Assistant
+ZONE_LEFT = "left"
+ZONE_RIGHT = "right"
 
-# --- Presets ---
-PRESET_ECO = "Eco"
-PRESET_MAX = "Max"
-PRESET_FRIDGE = "Fridge"
-PRESET_FREEZER = "Freezer"
+# UUIDs Bluetooth standards utilisés par les cartes de contrôle Alpicool/Outwell
+# Service de communication série transparent (UART)
+ALPICOOL_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
+ALPICOOL_CHARACTERISTIC_UUID = "0000fff1-0000-1000-8000-00805f9b34fb"
 
+# Headers de commandes du protocole Alpicool (Payload Bluetooth)
+# Le protocole utilise souvent des commandes de type "FE FE" suivies de la longueur et de l'action
+CMD_HEADER = [0xFE, 0xFE]
+CMD_POWER_ON = [0x01]
+CMD_POWER_OFF = [0x00]
 
-class Request:
-    """Possible Commands."""
-
-    BIND = 0x00
-    QUERY = 0x01
-    SET = 0x02
-    RESET = 0x04
-    SET_LEFT = 0x05
-    SET_RIGHT = 0x06
-
-
-# Response codes
-class Response(IntEnum):
-    """Message Response Codes."""
-
-    STATUS = 0x01
-    BATTERY = 0x02
-
-
-# Battery protection levels
-class BatteryProtection(IntEnum):
-    """Battery Protection Levels."""
-
-    LOW = 0
-    MEDIUM = 1
-    HIGH = 2
+# Constantes de fonctionnement
+MIN_TEMP = -20
+MAX_TEMP = 20
