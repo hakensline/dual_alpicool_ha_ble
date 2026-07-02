@@ -40,8 +40,10 @@ class AlpicoolBLEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             return self.async_create_entry(
                 title=self._discovery_info.name or "Glacière Outwell",
+                # On double les clés dans "data" pour satisfaire tous les fichiers à coup sûr
                 data={
                     CONF_MAC: self._discovery_info.address,
+                    "address": self._discovery_info.address,
                     CONF_NAME: self._discovery_info.name,
                 },
             )
@@ -66,8 +68,10 @@ class AlpicoolBLEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             return self.async_create_entry(
                 title=user_input.get(CONF_NAME) or f"Glacière ({mac_address})",
+                # Idem ici, on stocke sous "mac" et sous "address" pour éviter tout KeyError général
                 data={
                     CONF_MAC: mac_address,
+                    "address": mac_address,
                     CONF_NAME: user_input.get(CONF_NAME),
                 },
             )
