@@ -5,7 +5,7 @@ from typing import Any
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -19,14 +19,13 @@ async def async_setup_entry(
     """Configuration des entités basées sur le coordinateur."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
-    # Ajout des deux zones distinctes (Gauche et Droite)
     async_add_entities([
         AlpicoolBLEClimateCoordinator(coordinator, entry, ZONE_LEFT),
         AlpicoolBLEClimateCoordinator(coordinator, entry, ZONE_RIGHT)
     ])
 
 class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
-    """Représentation d'une zone de la glacière gérée par coordinateur."""
+    """Représentation d'une zone de la glacière."""
 
     _attr_has_entity_name = True
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL]
@@ -42,74 +41,66 @@ class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
         self._entry = entry
         self._zone = zone
         
-        # Attribution des noms
         zone_label = "Zone Gauche" if zone == ZONE_LEFT else "Zone Droite"
         self._attr_name = f"{zone_label}"
         self._attr_unique_id = f"{entry.entry_id}_{zone}"
         
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
+            "name": entry.title or "Glacière Outwell",
             "manufacturer": "Outwell / Alpicool",
         }
 
     @property
     def available(self) -> bool:
-        """Vérifie la disponibilité réelle basée sur le coordinateur Home Assistant."""
+        """Vérifie la disponibilité réelle."""
         return self.coordinator.last_update_success and self.coordinator.data is not None
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Détermine si la glacière entière est allumée."""
+        """Détermine si la glacière est allumée."""
         data = self.coordinator.data
-        # Si l'octet 5 (index 1 dans les données utiles si tronqué) indique 0, l'appareil est éteint
         if data and len(data) >= 6 and data[5] == 0:
             return HVACMode.OFF
         return HVACMode.COOL
 
     @property
     def current_temperature(self) -> float | None:
-        """Extrait la température en temps réel du tableau d'octets."""
+        """Extrait la température en temps réel."""
         data = self.coordinator.data
-        if not data or len(data) < 15:
+        if not data or len(data) < 14:
             return None
             
         try:
-            # Zone Gauche = Octet 14 | Zone Droite = Octet 26 (selon les trames standards Dual Zone)
             if self._zone == ZONE_LEFT:
-                return float(int.from_bytes([data[14]], byteorder="big", signed=True))
-            elif self._zone == ZONE_RIGHT and len(data) >= 27:
-                return float(int.from_bytes([data[26]], byteorder="big", signed=True))
-        except Exception as err:
-            _LOGGER.error("Erreur lecture température courante (%s): %s", self._zone, err)
-        return None
+                return float(int.from_bytes([data[7]], byteorder="big", signed=True))
+            elif self._zone == ZONE_RIGHT:
+                return float(int.from_bytes([data[8]], byteorder="big", signed=True))
+        except Exception:
+            return None
 
     @property
     def target_temperature(self) -> float | None:
-        """Extrait la consigne du tableau d'octets."""
+        """Extrait la consigne."""
         data = self.coordinator.data
-        if not data or len(data) < 19:
+        if not data or len(data) < 14:
             return None
             
         try:
-            # Zone Gauche Consigne = Octet 4 | Zone Droite Consigne = Octet 18
             if self._zone == ZONE_LEFT:
-                return float(int.from_bytes([data[4]], byteorder="big", signed=True))
-            elif self._zone == ZONE_RIGHT and len(data) >= 19:
-                return float(int.from_bytes([data[18]], byteorder="big", signed=True))
-        except Exception as err:
-            _LOGGER.error("Erreur lecture consigne (%s): %s", self._zone, err)
-        return None
+                return float(int.from_bytes([data[11]], byteorder="big", signed=True))
+            elif self._zone == ZONE_RIGHT:
+                return float(int.from_bytes([data[12]], byteorder="big", signed=True))
+        except Exception:
+            return None
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Transmet la consigne au coordinateur."""
+        """Transmet la consigne."""
         target_temp = kwargs.get(ATTR_TEMPERATURE)
-        if target_temp is None:
-            return
-
-        await self.coordinator.async_set_temperature(int(target_temp), self._zone)
+        if target_temp is not None:
+            await self.coordinator.async_set_temperature(int(target_temp), self._zone)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Allume ou éteint l'appareil complet."""
+        """Allume ou éteint l'appareil."""
         status = (hvac_mode == HVACMode.COOL)
         await self.coordinator.async_set_power(status)
