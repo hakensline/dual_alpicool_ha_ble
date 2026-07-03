@@ -2,25 +2,13 @@
 
 DOMAIN = "alpicool_ble"
 
-# Configuration
 CONF_MAC = "mac"
 CONF_NAME = "name"
 
-# Identifiants uniques des zones pour Home Assistant
+# Les identifiants de zone indispensables pour climate.py
 ZONE_LEFT = "left"
 ZONE_RIGHT = "right"
 
-# UUIDs Bluetooth standards utilisés par les cartes de contrôle Alpicool/Outwell
-# Service de communication série transparent (UART)
-ALPICOOL_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
-ALPICOOL_CHARACTERISTIC_UUID = "0000fff1-0000-1000-8000-00805f9b34fb"
-
-# Headers de commandes du protocole Alpicool (Payload Bluetooth)
-# Le protocole utilise souvent des commandes de type "FE FE" suivies de la longueur et de l'action
-CMD_HEADER = [0xFE, 0xFE]
-CMD_POWER_ON = [0x01]
-CMD_POWER_OFF = [0x00]
-
-# Constantes de fonctionnement
-MIN_TEMP = -20
-MAX_TEMP = 20
+# UUID Bluetooth standards utilisés par Alpicool / Outwell
+ALPICOOL_SERVICE_UUID = "00001234-0000-1000-8000-00805f9b34fb"  # À ajuster si ton modèle utilise un autre UUID
+ALPICOOL_CHARACTERISTIC_UUID = "0000FFF3-0000-1000-8000-00805f9b34fb"
