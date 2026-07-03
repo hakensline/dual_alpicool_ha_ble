@@ -1,6 +1,4 @@
-"""Support for Alpicool fridges via BLE."""
-from __future__ import annotations
-
+"""Support pour les glacières Alpicool / Outwell double zone via DataUpdateCoordinator."""
 import logging
 from typing import Any
 
@@ -8,30 +6,27 @@ from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, ZONE_LEFT, ZONE_RIGHT
 
 _LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the Alpicool BLE climate platform."""
-    api = hass.data[DOMAIN][entry.entry_id]
-    address = entry.data["address"]
-
-    # Modification : On force la création de deux entités distinctes pour les deux zones
+    """Configuration des entités basées sur le coordinateur."""
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    
+    # Ajout des deux zones distinctes (Gauche et Droite)
     async_add_entities([
-        AlpicoolBLEClimateDual(api, entry, address, "left"),
-        AlpicoolBLEClimateDual(api, entry, address, "right")
+        AlpicoolBLEClimateCoordinator(coordinator, entry, ZONE_LEFT),
+        AlpicoolBLEClimateCoordinator(coordinator, entry, ZONE_RIGHT)
     ])
 
-
-class AlpicoolBLEClimateDual(ClimateEntity):
-    """Representation of a single zone inside an Alpicool BLE fridge."""
+class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
+    """Représentation d'une zone de la glacière gérée par coordinateur."""
 
     _attr_has_entity_name = True
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL]
@@ -41,83 +36,80 @@ class AlpicoolBLEClimateDual(ClimateEntity):
     _attr_max_temp = 20
     _attr_target_temperature_step = 1
 
-    def __init__(self, api, entry: ConfigEntry, address: str, zone: str) -> None:
-        """Initialize the climate entity."""
-        self.api = api
+    def __init__(self, coordinator, entry: ConfigEntry, zone: str) -> None:
+        """Initialisation de la zone."""
+        super().__init__(coordinator)
         self._entry = entry
-        self._address = address
         self._zone = zone
         
-        # Identification unique pour chaque zone
-        zone_label = "Zone Gauche" if zone == "left" else "Zone Droite"
+        # Attribution des noms
+        zone_label = "Zone Gauche" if zone == ZONE_LEFT else "Zone Droite"
         self._attr_name = f"{zone_label}"
-        self._attr_unique_id = f"{entry.unique_id}_{zone}"
+        self._attr_unique_id = f"{entry.entry_id}_{zone}"
         
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": entry.title,
+            "manufacturer": "Outwell / Alpicool",
         }
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to updates."""
-        @callback
-        def async_update_state():
-            """Update the entity's state."""
-            self.async_write_ha_state()
-
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, f"{DOMAIN}_{self._address}_update", async_update_state
-            )
-        )
-
-    @property
-    def should_poll(self) -> bool:
-        """No polling needed."""
-        return False
 
     @property
     def available(self) -> bool:
-        """Return if the device is available."""
-        return self.api.is_available and len(self.api.status) > 0
+        """Vérifie la disponibilité réelle basée sur le coordinateur Home Assistant."""
+        return self.coordinator.last_update_success and self.coordinator.data is not None
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Return current HVAC mode."""
-        if self.api.status.get("powered_on", True):
-            return HVACMode.COOL
-        return HVACMode.OFF
+        """Détermine si la glacière entière est allumée."""
+        data = self.coordinator.data
+        # Si l'octet 5 (index 1 dans les données utiles si tronqué) indique 0, l'appareil est éteint
+        if data and len(data) >= 6 and data[5] == 0:
+            return HVACMode.OFF
+        return HVACMode.COOL
 
     @property
     def current_temperature(self) -> float | None:
-        """Return the current temperature depending on the zone."""
-        if self._zone == "left":
-            temp = self.api.status.get("left_current")
-        else:
-            # Récupère la zone droite décodée par l'API de Gruni22
-            temp = self.api.status.get("right_current")
-        return float(temp) if temp is not None else None
+        """Extrait la température en temps réel du tableau d'octets."""
+        data = self.coordinator.data
+        if not data or len(data) < 15:
+            return None
+            
+        try:
+            # Zone Gauche = Octet 14 | Zone Droite = Octet 26 (selon les trames standards Dual Zone)
+            if self._zone == ZONE_LEFT:
+                return float(int.from_bytes([data[14]], byteorder="big", signed=True))
+            elif self._zone == ZONE_RIGHT and len(data) >= 27:
+                return float(int.from_bytes([data[26]], byteorder="big", signed=True))
+        except Exception as err:
+            _LOGGER.error("Erreur lecture température courante (%s): %s", self._zone, err)
+        return None
 
     @property
     def target_temperature(self) -> float | None:
-        """Return the target temperature depending on the zone."""
-        if self._zone == "left":
-            target = self.api.status.get("left_target")
-        else:
-            # Récupère la consigne droite décodée par l'API de Gruni22
-            target = self.api.status.get("right_target")
-        return float(target) if target is not None else None
+        """Extrait la consigne du tableau d'octets."""
+        data = self.coordinator.data
+        if not data or len(data) < 19:
+            return None
+            
+        try:
+            # Zone Gauche Consigne = Octet 4 | Zone Droite Consigne = Octet 18
+            if self._zone == ZONE_LEFT:
+                return float(int.from_bytes([data[4]], byteorder="big", signed=True))
+            elif self._zone == ZONE_RIGHT and len(data) >= 19:
+                return float(int.from_bytes([data[18]], byteorder="big", signed=True))
+        except Exception as err:
+            _LOGGER.error("Erreur lecture consigne (%s): %s", self._zone, err)
+        return None
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set new target temperature."""
+        """Transmet la consigne au coordinateur."""
         target_temp = kwargs.get(ATTR_TEMPERATURE)
         if target_temp is None:
             return
 
-        # Appel direct de la méthode native de Gruni22 : async_set_temperature(zone, temp)
-        await self.api.async_set_temperature(self._zone, int(target_temp))
+        await self.coordinator.async_set_temperature(int(target_temp), self._zone)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Turn the fridge on or off."""
-        is_on = 1 if hvac_mode == HVACMode.COOL else 0
-        await self.api.async_set_values({"powered_on": is_on})
+        """Allume ou éteint l'appareil complet."""
+        status = (hvac_mode == HVACMode.COOL)
+        await self.coordinator.async_set_power(status)
