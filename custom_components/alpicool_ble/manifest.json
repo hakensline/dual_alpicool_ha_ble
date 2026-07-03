@@ -1,15 +1,20 @@
 {
   "domain": "alpicool_ble",
-  "name": "Alpicool BLE Dual Zone",
+  "name": "Alpicool BLE",
   "config_flow": true,
   "documentation": "https://github.com/Gruni22/alpicool_ha_ble",
   "iot_class": "local_polling",
   "codeowners": ["@Gruni22"],
-  "requirements": ["bleak", "bleak-retry-connector"],
+  "issue_tracker": "https://github.com/Gruni22/alpicool_ha_ble/issues",
+  "requirements": ["bleak"],
   "dependencies": ["bluetooth_adapters"],
-  "version": "3.2.0-dualzone",
+  "version": "3.1.5",
   "bluetooth": [
-    { "service_uuid": "00001234-0000-1000-8000-00805f9b34fb" },
-    { "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb" }
+    {
+      "service_uuid": "00001234-0000-1000-8000-00805f9b34fb"
+    },
+    {
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
+    }
   ]
 }
