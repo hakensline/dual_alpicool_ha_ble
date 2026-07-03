@@ -9,7 +9,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
-# On importe bien le canal d'écoute (FFF1) et le canal d'écriture (FFF3)
 from .const import DOMAIN, CONF_MAC, ZONE_LEFT, ALPICOOL_CHARACTERISTIC_UUID, FRIDGE_NOTIFY_UUID
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,12 +74,12 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                 self._connected = True
                 _LOGGER.info("Connecté avec succès à la glacière %s !", self.address)
 
-                # CORRECTION : On écoute sur le canal FFF1 (FRIDGE_NOTIFY_UUID)
+                # Écoute sur le canal de notification FFF1
                 await self.client.start_notify(FRIDGE_NOTIFY_UUID, self._notification_handler)
                 
                 # Boucle de rafraîchissement
                 while self.client.is_connected and self._connected:
-                    # Ping pour demander les températures (sur le canal d'écriture FFF3)
+                    # Demande d'état (Ping envoyé sur FFF3)
                     await self.client.write_gatt_char(
                         ALPICOOL_CHARACTERISTIC_UUID, 
                         bytes([0xFE, 0xFE, 0x03, 0x01, 0x02, 0x00]), 
@@ -101,7 +100,7 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
     def _notification_handler(self, sender: int, data: bytearray):
         """Réception de la trame et injection directe."""
         if len(data) >= 14:
-            # On affiche la trame dans les logs en info pour s'assurer que les données rentrent bien
+            # Écriture forcée dans les journaux système pour le décodage
             _LOGGER.info("Trame reçue (Hex): %s", data.hex())
             self.data = data
             self.async_set_updated_data(self.data)
