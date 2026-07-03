@@ -9,7 +9,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
 
-from .const import DOMAIN, CONF_MAC, ZONE_LEFT, ALPICOOL_CHARACTERISTIC_UUID
+# On importe bien le canal d'écoute (FFF1) et le canal d'écriture (FFF3)
+from .const import DOMAIN, CONF_MAC, ZONE_LEFT, ALPICOOL_CHARACTERISTIC_UUID, FRIDGE_NOTIFY_UUID
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.CLIMATE]
@@ -22,7 +23,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = AlpicoolBluetoothCoordinator(hass, address)
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Tâche de fond pour la connexion Bluetooth
     entry.async_create_background_task(hass, coordinator.async_connect(), "alpicool_ble_connection")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -64,7 +64,6 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
 
                 _LOGGER.info("Tentative de connexion sécurisée à la glacière %s", self.address)
                 
-                # Connexion avec vidage du cache pour forcer la détection du canal FFF3
                 self.client = await establish_connection(
                     BleakClientWithServiceCache,
                     ble_device,
@@ -76,11 +75,12 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                 self._connected = True
                 _LOGGER.info("Connecté avec succès à la glacière %s !", self.address)
 
-                # Écoute des paquets Bluetooth
-                await self.client.start_notify(ALPICOOL_CHARACTERISTIC_UUID, self._notification_handler)
+                # CORRECTION : On écoute sur le canal FFF1 (FRIDGE_NOTIFY_UUID)
+                await self.client.start_notify(FRIDGE_NOTIFY_UUID, self._notification_handler)
                 
-                # Boucle de rafraîchissement (Ping toutes les 5 secondes)
+                # Boucle de rafraîchissement
                 while self.client.is_connected and self._connected:
+                    # Ping pour demander les températures (sur le canal d'écriture FFF3)
                     await self.client.write_gatt_char(
                         ALPICOOL_CHARACTERISTIC_UUID, 
                         bytes([0xFE, 0xFE, 0x03, 0x01, 0x02, 0x00]), 
@@ -89,19 +89,20 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                     await asyncio.sleep(5)
                     
             except Exception as err:
-                _LOGGER.debug("Statut de connexion déconnecté ou erreur : %s. Reconnexion dans 10s...", err)
+                _LOGGER.debug("Statut de connexion déconnecté : %s", err)
             
             self._connected = False
             await asyncio.sleep(10)
 
     def _on_disconnected(self, client):
         """Déclenché automatiquement lors d'une perte de liaison."""
-        _LOGGER.info("Liaison Bluetooth perdue avec la glacière")
         self._connected = False
 
     def _notification_handler(self, sender: int, data: bytearray):
         """Réception de la trame et injection directe."""
         if len(data) >= 14:
+            # On affiche la trame dans les logs en info pour s'assurer que les données rentrent bien
+            _LOGGER.info("Trame reçue (Hex): %s", data.hex())
             self.data = data
             self.async_set_updated_data(self.data)
 
@@ -137,7 +138,7 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
         self._connected = False
         if self.client:
             try:
-                await self.client.stop_notify(ALPICOOL_CHARACTERISTIC_UUID)
+                await self.client.stop_notify(FRIDGE_NOTIFY_UUID)
                 await self.client.disconnect()
             except Exception:
                 pass
