@@ -61,7 +61,7 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                     await asyncio.sleep(10)
                     continue
 
-                _LOGGER.info("Tentative de connexion sécurisée à la glacière %s", self.address)
+                _LOGGER.info("Tentative de connexion à %s", self.address)
                 
                 self.client = await establish_connection(
                     BleakClientWithServiceCache,
@@ -72,14 +72,12 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                 )
                 
                 self._connected = True
-                _LOGGER.info("Connecté avec succès à la glacière %s !", self.address)
+                _LOGGER.info("Connecté avec succès à la glacière %s", self.address)
 
-                # Écoute sur le canal de notification FFF1
                 await self.client.start_notify(FRIDGE_NOTIFY_UUID, self._notification_handler)
                 
-                # Boucle de rafraîchissement
                 while self.client.is_connected and self._connected:
-                    # Demande d'état (Ping envoyé sur FFF3)
+                    # Ping régulier pour maintenir la connexion et demander l'état
                     await self.client.write_gatt_char(
                         ALPICOOL_CHARACTERISTIC_UUID, 
                         bytes([0xFE, 0xFE, 0x03, 0x01, 0x02, 0x00]), 
@@ -88,7 +86,7 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
                     await asyncio.sleep(5)
                     
             except Exception as err:
-                _LOGGER.debug("Statut de connexion déconnecté : %s", err)
+                _LOGGER.debug("Erreur de connexion : %s", err)
             
             self._connected = False
             await asyncio.sleep(10)
@@ -98,10 +96,10 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
         self._connected = False
 
     def _notification_handler(self, sender: int, data: bytearray):
-        """Réception de la trame et injection directe."""
+        """Réception de la trame et mouchard de débogage."""
+        # --- MOUCHARD DE TRACE POUR DÉBOGAGE (Visible en WARNING) ---
         if len(data) >= 14:
-            # Écriture forcée dans les journaux système pour le décodage
-            _LOGGER.info("Trame reçue (Hex): %s", data.hex())
+            _LOGGER.warning("=== ALPICOOL TRACE === Trame reçue (Hex): %s (Longueur: %s)", data.hex(), len(data))
             self.data = data
             self.async_set_updated_data(self.data)
 
@@ -110,11 +108,16 @@ class AlpicoolBluetoothCoordinator(DataUpdateCoordinator):
         if not self._connected or not self.client:
             return
 
+        # Construction de la commande hexadécimale : FE FE 04 03 (ZONE) (TEMP)
         cmd = bytearray([0xFE, 0xFE, 0x04, 0x03])
-        if zone == ZONE_LEFT:
-            cmd.extend([0x01, temp & 0xFF])
-        else:
+        
+        # On détermine l'index de zone en fonction du label inversé
+        # Label inversé : ZONE_LEFT="right", ZONE_RIGHT="left"
+        # Physiquement : Gauche=0x01, Droite=0x02
+        if zone == ZONE_LEFT: # C'est le label HA "Gauche", on pilote la zone PHYSIQUE droite
             cmd.extend([0x02, temp & 0xFF])
+        else: # C'est le label HA "Droite", on pilote la zone PHYSIQUE gauche
+            cmd.extend([0x01, temp & 0xFF])
             
         try:
             await self.client.write_gatt_char(ALPICOOL_CHARACTERISTIC_UUID, bytes(cmd), response=False)
