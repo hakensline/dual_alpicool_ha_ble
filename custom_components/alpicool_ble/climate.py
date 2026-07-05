@@ -41,6 +41,9 @@ class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
         self._entry = entry
         self._zone = zone
         
+        # Le label inversé est défini dans const.py
+        # ZONE_LEFT="right" -> "Zone Gauche"
+        # ZONE_RIGHT="left" -> "Zone Droite"
         zone_label = "Zone Gauche" if zone == ZONE_LEFT else "Zone Droite"
         self._attr_name = f"{zone_label}"
         self._attr_unique_id = f"{entry.entry_id}_{zone}"
@@ -66,30 +69,38 @@ class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
 
     @property
     def current_temperature(self) -> float | None:
-        """Extrait la température en temps réel."""
+        """Extrait la température en temps réel (Index 7 et 8 pour Alpicool)."""
         data = self.coordinator.data
         if not data or len(data) < 14:
             return None
             
+        # NOUVEAU : On utilise directement les index standardisés 7 et 8
+        # car on a géré l'inversion de label dans const.py.
+        # Index 7 = Température Zone Physique GAUCHE (Positive)
+        # Index 8 = Température Zone Physique DROITE (Négative)
         try:
-            if self._zone == ZONE_LEFT:
+            if self._zone == ZONE_RIGHT: # HA "Droite" = Physique Gauche, lit index 7
                 return float(int.from_bytes([data[7]], byteorder="big", signed=True))
-            elif self._zone == ZONE_RIGHT:
+            elif self._zone == ZONE_LEFT: # HA "Gauche" = Physique Droite, lit index 8
                 return float(int.from_bytes([data[8]], byteorder="big", signed=True))
         except Exception:
             return None
 
     @property
     def target_temperature(self) -> float | None:
-        """Extrait la consigne."""
+        """Extrait la consigne (Index 11 et 12 pour Alpicool)."""
         data = self.coordinator.data
         if not data or len(data) < 14:
             return None
             
+        # NOUVEAU : On utilise directement les index standardisés 11 et 12
+        # car on a géré l'inversion de label dans const.py.
+        # Index 11 = Consigne Zone Physique GAUCHE
+        # Index 12 = Consigne Zone Physique DROITE
         try:
-            if self._zone == ZONE_LEFT:
+            if self._zone == ZONE_RIGHT: # HA "Droite" = Physique Gauche, lit index 11
                 return float(int.from_bytes([data[11]], byteorder="big", signed=True))
-            elif self._zone == ZONE_RIGHT:
+            elif self._zone == ZONE_LEFT: # HA "Gauche" = Physique Droite, lit index 12
                 return float(int.from_bytes([data[12]], byteorder="big", signed=True))
         except Exception:
             return None
@@ -98,9 +109,11 @@ class AlpicoolBLEClimateCoordinator(CoordinatorEntity, ClimateEntity):
         """Transmet la consigne."""
         target_temp = kwargs.get(ATTR_TEMPERATURE)
         if target_temp is not None:
+            # L'inversion est gérée dans async_set_temperature du coordinateur (__init__.py)
             await self.coordinator.async_set_temperature(int(target_temp), self._zone)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Allume ou éteint l'appareil."""
         status = (hvac_mode == HVACMode.COOL)
         await self.coordinator.async_set_power(status)
+        
